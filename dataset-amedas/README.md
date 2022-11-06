@@ -4,4 +4,4 @@
 - 季節: 2022年1月・2022年8月
 - データ: 気温・降水量
 
-気象庁「過去の気象データ・ダウンロード」 （https://www.data.jma.go.jp/gmd/risk/obsdl/index.php）を加工して作成
+気象庁「過去の気象データ・ダウンロード」 <https://www.data.jma.go.jp/gmd/risk/obsdl/index.php> を加工して作成

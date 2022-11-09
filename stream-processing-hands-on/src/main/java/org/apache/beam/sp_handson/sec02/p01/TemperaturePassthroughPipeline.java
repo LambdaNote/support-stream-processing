@@ -29,6 +29,10 @@ public class TemperaturePassthroughPipeline {
             .withKeyDeserializer(LongDeserializer.class)
             .withValueDeserializer(StringDeserializer.class)
 
+            // Producerからcommitされたデータのみを読む
+            // (これがないとmacOSでBufferUnderflowException観測する場合あり)
+            .withReadCommitted()
+
             // 出力PCollectionの型をKafkaRecordではなくKVとする
             .withoutMetadata());
 

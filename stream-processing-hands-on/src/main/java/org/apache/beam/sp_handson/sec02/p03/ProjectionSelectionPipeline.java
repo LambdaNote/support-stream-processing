@@ -50,9 +50,11 @@ public class ProjectionSelectionPipeline {
           }
         }));
 
+    // 射影: rainfallMm以外のフィールドに絞り込む
     PCollection<Row> temperature = weather.apply(
         Select.fieldNames("timestamp", "temperatureC"));
 
+    // 選択: 気温が0℃以上のイベントに絞り込む
     PCollection<Row> nonNegTemperature = temperature.apply(
         Filter.<Row>create().whereFieldName("temperatureC", temp -> (float) temp >= 0));
 

@@ -34,8 +34,8 @@ public class JsonParsePipeline {
             .withReadCommitted()
             .withoutMetadata());
 
+    // KV<Long, String> のバリュー部分をJSONとしてパースし、Weatherクラスにマッピング
     PCollection<Weather> weather = kafkaInput.apply(
-        // KV<Long, String> のバリュー部分をJSONとしてパースし、Weatherクラスにマッピング
         ParDo.of(new DoFn<KV<Long, String>, Weather>() {
           @ProcessElement
           public void processElement(@Element KV<Long, String> rawWeather, OutputReceiver<Weather> out)

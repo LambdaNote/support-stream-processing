@@ -62,7 +62,7 @@ public class ProjectionSelectionPipeline {
     PCollection<String> nonNegTemperatureLine = nonNegTemperature.apply(
         MapElements
             .into(TypeDescriptors.strings())
-            .via(row -> row.getString("timestamp") + "\t" + row.getFloat("temperatureC")));
+            .via(row -> row.getString("timestamp") + "\ttemperature:" + row.getFloat("temperatureC")));
 
     // Kafkaシンク出力
     nonNegTemperatureLine.apply(

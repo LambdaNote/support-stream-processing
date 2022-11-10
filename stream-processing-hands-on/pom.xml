@@ -30,6 +30,7 @@
     <maven-compiler-plugin.version>3.7.0</maven-compiler-plugin.version>
     <maven-exec-plugin.version>1.6.0</maven-exec-plugin.version>
     <slf4j.version>1.7.30</slf4j.version>
+    <kafka.version>3.3.1</kafka.version>
     <jackson.version>2.13.4</jackson.version>
   </properties>
 
@@ -105,7 +106,7 @@
     <dependency>
       <groupId>org.apache.kafka</groupId>
       <artifactId>kafka-clients</artifactId>
-      <version>3.3.1</version>
+      <version>${kafka.version}</version>
     </dependency>
 
     <!-- slf4j API frontend binding with JUL backend -->

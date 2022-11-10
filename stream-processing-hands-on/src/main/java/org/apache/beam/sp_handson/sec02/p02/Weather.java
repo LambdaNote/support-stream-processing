@@ -8,17 +8,17 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 // アメダス気象情報
-@DefaultSchema(JavaFieldSchema.class)
+@DefaultSchema(JavaFieldSchema.class) // BeamのSchemaとする
 public class Weather {
-    // 観測日時
+    // 観測日時 (RFC-3339 形式)
     public final String timestamp;
     // 気温 [℃]
     public final float temperatureC;
     // 降水量 [mm]
     public final float rainfallMm;
 
-    @JsonCreator
-    @SchemaCreate
+    @JsonCreator // JacksonでJSONパース
+    @SchemaCreate // BeamのSchemaのコンストラクタ
     public Weather(
             @JsonProperty("timestamp") String timestamp,
             @JsonProperty("temperature [°C]") float temperatureC,

@@ -21,10 +21,10 @@ public class JsonParsePipeline {
   private static final ObjectMapper objectMapper = new ObjectMapper();
 
   public static void main(String[] args) {
-    // 空のパイプラインを作成
     Pipeline p = Pipeline.create(
         PipelineOptionsFactory.fromArgs(args).withValidation().create());
 
+    // Kafkaソース入力
     PCollection<KV<Long, String>> kafkaInput = p.apply(
         KafkaIO.<Long, String>read()
             .withBootstrapServers("localhost:9092")
@@ -35,7 +35,8 @@ public class JsonParsePipeline {
             .withoutMetadata());
 
     PCollection<Weather> weather = kafkaInput.apply(
-        ParDo.of(new DoFn<KV<Long, String>, Weather>() { // a DoFn as an anonymous inner class instance
+        // KV<Long, String> のバリュー部分をJSONとしてパースし、Weatherクラスにマッピング
+        ParDo.of(new DoFn<KV<Long, String>, Weather>() {
           @ProcessElement
           public void processElement(@Element KV<Long, String> rawWeather, OutputReceiver<Weather> out)
               throws JsonProcessingException {
@@ -45,25 +46,20 @@ public class JsonParsePipeline {
           }
         }));
 
+    // Weatherクラスをフォーマットして文字列化
     PCollection<String> weatherLine = weather.apply(
         MapElements
             .into(TypeDescriptors.strings())
             .via(Weather::toLine));
 
-    // kafkaInputが上記入力トランスフォームの出力PCollection
-    // 入力トランスフォーム以外のトランスフォームは、上流のPCollectionから .apply() で生やす
+    // Kafkaシンク出力
     weatherLine.apply(
-        // 出力トランスフォームを作る
         KafkaIO.<Void, String>write()
-            // Kafkaのbootstrap-serverへの接続情報
             .withBootstrapServers("localhost:9092")
-            // トピック
             .withTopic("beam-out")
-            // シリアライズ指示
             .withValueSerializer(StringSerializer.class)
             .values());
 
-    // パイプラインを起動
     p.run();
   }
 }

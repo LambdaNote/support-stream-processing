@@ -1,0 +1,21 @@
+<configuration>
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>INFO</level>
+        </filter>
+        <layout class="ch.qos.logback.classic.PatternLayout">
+            <Pattern>%d{yyyy-MMM-dd HH:mm:ss.SSS} %-5level %marker %logger - %msg%n</Pattern>
+        </layout>
+    </appender>
+
+    <logger name="org.apache.kafka.clients" level="WARN">
+        <appender-ref ref="STDOUT"/>
+    </logger>
+    <logger name="org.apache.kafka.common" level="WARN">
+        <appender-ref ref="STDOUT"/>
+    </logger>
+
+    <root level="${ROOT_LEVEL}">
+        <appender-ref ref="STDOUT"/>
+    </root>
+</configuration>

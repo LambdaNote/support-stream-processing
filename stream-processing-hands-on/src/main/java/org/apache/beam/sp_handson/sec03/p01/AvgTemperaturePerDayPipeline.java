@@ -7,6 +7,7 @@ import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.Mean;
 import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.transforms.WithTimestamps;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
 import org.apache.beam.sdk.transforms.windowing.IntervalWindow;
 import org.apache.beam.sdk.transforms.windowing.Window;
@@ -53,20 +54,19 @@ public class AvgTemperaturePerDayPipeline {
           }
         }));
 
-    // Event timeを設定しつつ、気温のみ抽出
-    PCollection<Float> timestampedTemperature = weather.apply(
-        ParDo.of(new DoFn<Weather, Float>() {
-          @ProcessElement
-          public void processElement(
-              @FieldAccess("timestamp") String timestamp,
-              @FieldAccess("temperatureC") float temperatureC,
-              OutputReceiver<Float> out) {
-            // 観測日時をパース
-            Instant eventTime = Instant.parse(timestamp);
-            // 観測日時をevent timeとして設定
-            out.outputWithTimestamp(temperatureC, eventTime);
-          }
-        }));
+    // Event timeを設定しつつ、過去の日時の気象情報データを許容できるようにする
+    //
+    // .withAllowedTimestampSkewはdeprecatedになっており
+    // https://issues.apache.org/jira/browse/BEAM-644 で代替が提案されているが、
+    // Beam v2.42.0点では大体は使えない。
+    PCollection<Weather> timestampedWeather = weather.apply(
+        WithTimestamps.<Weather>of(w -> Instant.parse(w.timestamp))
+            .withAllowedTimestampSkew(new Duration(Long.MAX_VALUE)));
+
+    PCollection<Float> timestampedTemperature = timestampedWeather.apply(
+        MapElements
+            .into(TypeDescriptors.floats())
+            .via(w -> w.temperatureC));
 
     PCollection<Float> windowedTemperature = timestampedTemperature.apply(
         Window.<Float>into(FixedWindows.of(Duration.standardDays(1))));

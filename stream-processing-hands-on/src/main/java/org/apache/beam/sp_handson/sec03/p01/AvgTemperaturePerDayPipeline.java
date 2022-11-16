@@ -4,6 +4,7 @@ import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.kafka.KafkaIO;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.DoFn;
+import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.Mean;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
@@ -11,6 +12,7 @@ import org.apache.beam.sdk.transforms.windowing.IntervalWindow;
 import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.TypeDescriptors;
 import org.apache.beam.sp_handson.sec02.p02.Weather;
 import org.apache.kafka.common.serialization.LongDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -69,21 +71,28 @@ public class AvgTemperaturePerDayPipeline {
     PCollection<Float> windowedTemperature = timestampedTemperature.apply(
         Window.<Float>into(FixedWindows.of(Duration.standardDays(1))));
 
-    PCollection<Double> meanTemperature = windowedTemperature.apply(
-        Mean.<Float>globally());
-
-    // フォーマットして文字列化。その際window開始時刻もとる
-    PCollection<String> meanTemperatureLine = meanTemperature.apply(
-        ParDo.of(new DoFn<Double, String>() {
+    // 日付ごとに平均気温を出すため、日付（ウィンドウの開始時刻）をキーにする
+    PCollection<KV<Instant, Float>> keyedTemperature = windowedTemperature.apply(
+        ParDo.of(new DoFn<Float, KV<Instant, Float>>() {
           @ProcessElement
           public void processElement(
-              @Element Double mean,
+              @Element Float temperature,
               IntervalWindow window,
-              OutputReceiver<String> out) {
-            String line = window.start().toString() + "\tmeanTemperature(daily):" + mean;
-            out.output(line);
+              OutputReceiver<KV<Instant, Float>> out) {
+            Instant keyDate = window.start();
+            KV<Instant, Float> keyedTemperature = KV.of(keyDate, temperature);
+            out.output(keyedTemperature);
           }
         }));
+
+    PCollection<KV<Instant, Double>> meanTemperature = keyedTemperature.apply(
+        Mean.<Instant, Float>perKey());
+
+    // フォーマットして文字列化
+    PCollection<String> meanTemperatureLine = meanTemperature.apply(
+        MapElements
+            .into(TypeDescriptors.strings())
+            .via(kv -> kv.getKey().toString() + "\tmeanTemperature(daily):" + kv.getValue()));
 
     // Kafkaシンク出力
     meanTemperatureLine.apply(

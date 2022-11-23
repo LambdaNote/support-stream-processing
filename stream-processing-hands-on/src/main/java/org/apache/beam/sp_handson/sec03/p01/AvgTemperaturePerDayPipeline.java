@@ -16,7 +16,9 @@ import org.apache.beam.sp_handson.sec02.p02.Weather;
 import org.apache.kafka.common.serialization.LongDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.joda.time.DateTimeZone;
 import org.joda.time.Duration;
+import org.joda.time.Instant;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -53,24 +55,32 @@ public class AvgTemperaturePerDayPipeline {
                     }
                 }));
 
-        // 気象情報から気温だけを抽出
-        PCollection<Float> temperature = weather.apply(
-                MapElements
-                        .into(TypeDescriptors.floats())
-                        .via(w -> w.temperatureC));
+        // 気象情報から日付と気温だけを抽出
+        PCollection<KV<String, Float>> temperatureWithDate = weather.apply(
+                ParDo.of(new DoFn<Weather, KV<String, Float>>() {
+                    @ProcessElement
+                    public void processElement(
+                            @Element Weather w, OutputReceiver<KV<String, Float>> out) {
+
+                        String date = Instant.parse(w.timestamp).toDateTime(DateTimeZone.forID("+09:00"))
+                                .toLocalDate().toString();
+                        out.output(KV.of(date, w.temperatureC));
+                    }
+                }));
 
         // Event time軸で1日毎の固定幅ウィンドウを構築
-        PCollection<Float> windowedTemperature = temperature.apply(
-                Window.<Float>into(FixedWindows.of(Duration.standardDays(1))));
-        // 各ウィンドウで気温の平均値を計算
-        PCollection<Double> meanTemperature = windowedTemperature.apply(
-                Mean.<Float>globally().withoutDefaults());
+        PCollection<KV<String, Float>> windowedTemperatureWithDate = temperatureWithDate.apply(
+                Window.<KV<String, Float>>into(FixedWindows.of(Duration.standardDays(1))));
+        // 日付毎に、各ウィンドウで気温の平均値を計算
+        PCollection<KV<String, Double>> meanTemperature = windowedTemperatureWithDate.apply(
+                Mean.<String, Float>perKey());
 
         // フォーマットして文字列化
         PCollection<String> meanTemperatureLine = meanTemperature.apply(
                 MapElements
                         .into(TypeDescriptors.strings())
-                        .via(mean -> "meanTemperature(daily):" + mean));
+                        .via(meanByDate -> "date:" + meanByDate.getKey() + "\tmeanTemperature(daily):"
+                                + meanByDate.getValue()));
 
         // Kafkaシンク出力
         meanTemperatureLine.apply(

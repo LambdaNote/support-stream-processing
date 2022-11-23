@@ -7,6 +7,7 @@ import org.apache.beam.sdk.options.PipelineOptionsFactory;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.Mean;
+import org.apache.beam.sdk.transforms.PTransform;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimator;
@@ -33,6 +34,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class AvgTemperaturePerDayPipeline {
+
   // アメダス観測のJSON文字列をWeatherクラスにマッピングするため
   private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -47,6 +49,7 @@ public class AvgTemperaturePerDayPipeline {
             .withTopic("weather-kushiro")
             .withKeyDeserializer(LongDeserializer.class)
             .withValueDeserializer(StringDeserializer.class)
+            .withTimestampPolicyFactory(new WeatherTimestampPolicyFactory<>())
             .withReadCommitted()
             .withoutMetadata());
 
@@ -54,46 +57,12 @@ public class AvgTemperaturePerDayPipeline {
     PCollection<Weather> weather = kafkaInput.apply(
         ParDo.of(new DoFn<KV<Long, String>, Weather>() {
           @ProcessElement
-          public void processElement(
-              ProcessContext c,
-              RestrictionTracker<OffsetRange, Long> tracker,
-
-              WatermarkEstimator watermarkEstimator)
+          public void processElement(@Element KV<Long, String> rawWeather, OutputReceiver<Weather> out)
               throws JsonProcessingException {
-
-            if (tracker.tryClaim(0L)) {
-              System.out.println("WM: " + watermarkEstimator.currentWatermark());
-
-              String jsonWeather = c.element().getValue();
-              Weather weather = objectMapper.readValue(jsonWeather, Weather.class);
-              Instant timestamp = Instant.parse(weather.timestamp);
-              c.outputWithTimestamp(weather, timestamp);
-            }
-
-          }
-
-          @GetInitialWatermarkEstimatorState
-          public Instant getInitialWatermarkEstimatorState(
-              @Element KV<Long, String> rawWeather) throws JsonProcessingException {
-
             String jsonWeather = rawWeather.getValue();
             Weather weather = objectMapper.readValue(jsonWeather, Weather.class);
-
-            return Instant.parse(weather.timestamp);
+            out.output(weather);
           }
-
-          @NewWatermarkEstimator
-          public WatermarkEstimator<Instant> newWatermarkEstimator(
-              @WatermarkEstimatorState Instant watermarkEstimatorState) {
-            return new WatermarkEstimators.MonotonicallyIncreasing(
-                watermarkEstimatorState);
-          }
-
-          @GetInitialRestriction
-          public OffsetRange getInitialRestriction(@Element KV<Long, String> rawWeather) {
-            return new OffsetRange(0L, 1L);
-          }
-
         }));
 
     PCollection<Float> temperature = weather.apply(
@@ -102,12 +71,7 @@ public class AvgTemperaturePerDayPipeline {
             .via(w -> w.temperatureC));
 
     PCollection<Float> windowedTemperature = temperature.apply(
-        Window.<Float>into(new GlobalWindows())
-            .triggering(
-                Repeatedly.forever(
-                    AfterProcessingTime.pastFirstElementInPane().plusDelayOf(Duration.standardSeconds(1))))
-            .withAllowedLateness(Duration.standardHours(0))
-            .accumulatingFiredPanes()
+        Window.<Float>into(FixedWindows.of(Duration.standardDays(1)))
 
     // .triggering(
     // Repeatedly.forever(AfterWatermark.pastEndOfWindow()
@@ -121,20 +85,20 @@ public class AvgTemperaturePerDayPipeline {
     // .accumulatingFiredPanes()
     );
 
-    // // 日付ごとに平均気温を出すため、日付（ウィンドウの開始時刻）をキーにする
-    // PCollection<KV<Instant, Float>> keyedTemperature = windowedTemperature.apply(
-    // ParDo.of(new DoFn<Float, KV<Instant, Float>>() {
-    // @ProcessElement
-    // public void processElement(
-    // @Element Float temperature,
-    // IntervalWindow window,
-    // OutputReceiver<KV<Instant, Float>> out) {
-    // Instant keyDate = window.start();
-    // System.out.println("KV: " + keyDate + ", " + temperature);
-    // KV<Instant, Float> keyedTemperature = KV.of(keyDate, temperature);
-    // out.output(keyedTemperature);
-    // }
-    // }));
+    // 日付ごとに平均気温を出すため、日付（ウィンドウの開始時刻）をキーにする
+    PCollection<KV<Instant, Float>> keyedTemperature = windowedTemperature.apply(
+        ParDo.of(new DoFn<Float, KV<Instant, Float>>() {
+          @ProcessElement
+          public void processElement(
+              @Element Float temperature,
+              IntervalWindow window,
+              OutputReceiver<KV<Instant, Float>> out) {
+            Instant keyDate = window.start();
+            System.out.println("KV: " + keyDate + ", " + temperature);
+            KV<Instant, Float> keyedTemperature = KV.of(keyDate, temperature);
+            out.output(keyedTemperature);
+          }
+        }));
 
     PCollection<Double> meanTemperature = windowedTemperature.apply(
         Mean.<Float>globally().withoutDefaults());

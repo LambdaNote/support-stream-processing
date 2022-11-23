@@ -60,8 +60,9 @@ public class AvgTemperaturePerDayPipeline {
                 ParDo.of(new DoFn<Weather, KV<String, Float>>() {
                     @ProcessElement
                     public void processElement(
-                            @Element Weather w, OutputReceiver<KV<String, Float>> out) {
-
+                            @Element Weather w,
+                            OutputReceiver<KV<String, Float>> out) {
+                        // 日本時間での日付
                         String date = Instant.parse(w.timestamp).toDateTime(DateTimeZone.forID("+09:00"))
                                 .toLocalDate().toString();
                         out.output(KV.of(date, w.temperatureC));
@@ -70,7 +71,11 @@ public class AvgTemperaturePerDayPipeline {
 
         // Event time軸で1日毎の固定幅ウィンドウを構築
         PCollection<KV<String, Float>> windowedTemperatureWithDate = temperatureWithDate.apply(
-                Window.<KV<String, Float>>into(FixedWindows.of(Duration.standardDays(1))));
+                Window.<KV<String, Float>>into(
+                        FixedWindows.of(Duration.standardDays(1))
+                                // ウィンドウの開始日時はUTC原点の0時になるので日本時間の0時にずらす
+                                .withOffset(Duration.standardHours(9))));
+
         // 日付毎に、各ウィンドウで気温の平均値を計算
         PCollection<KV<String, Double>> meanTemperature = windowedTemperatureWithDate.apply(
                 Mean.<String, Float>perKey());

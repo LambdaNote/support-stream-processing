@@ -5,7 +5,6 @@ import java.util.Optional;
 import org.apache.beam.sdk.io.kafka.KafkaRecord;
 import org.apache.beam.sdk.io.kafka.TimestampPolicy;
 import org.apache.beam.sdk.io.kafka.TimestampPolicyFactory;
-import org.apache.beam.sdk.transforms.windowing.BoundedWindow;
 import org.apache.beam.sp_handson.sec02.p02.Weather;
 import org.apache.kafka.common.TopicPartition;
 import org.joda.time.Instant;
@@ -13,7 +12,10 @@ import org.joda.time.Instant;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-// Returns TIMESTAMP_MAX_VALUE for watermark when all the records are read from a partition.
+// KafkaIO.Read で使う、Event timeの割当ポリシー（のファクトリ）。
+// 値がJSON文字列であること、Weatherクラスにマッピングできることを前提とし動作。
+//
+// KafkaレコードをいちいちJSONパースするのでパフォーマンス状は良い実装とは言えない。
 public class WeatherTimestampPolicyFactory<K> implements TimestampPolicyFactory<K, String> {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 

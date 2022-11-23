@@ -8,7 +8,6 @@ import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.Mean;
 import org.apache.beam.sdk.transforms.ParDo;
-import org.apache.beam.sdk.transforms.WithTimestamps;
 import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimator;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimators;
@@ -87,18 +86,7 @@ public class AvgTemperaturePerDayPipeline {
 
         }));
 
-    // Event timeを設定しつつ、過去の日時の気象情報データを許容できるようにする
-    //
-    // .withAllowedTimestampSkewはdeprecatedになっており
-    // https://issues.apache.org/jira/browse/BEAM-644 で代替が提案されているが、
-    // Beam v2.42.0点では大体は使えない。
-    PCollection<Weather> timestampedWeather = weather.apply(
-        WithTimestamps.<Weather>of(w -> Instant.parse(w.timestamp))
-    // .withAllowedTimestampSkew(new Duration(Long.MAX_VALUE))
-
-    );
-
-    PCollection<Float> timestampedTemperature = timestampedWeather.apply(
+    PCollection<Float> timestampedTemperature = weather.apply(
         MapElements
             .into(TypeDescriptors.floats())
             .via(w -> w.temperatureC));

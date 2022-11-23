@@ -51,9 +51,14 @@ public class AvgTemperaturePerDayPipeline {
           @ProcessElement
           public void processElement(
               ProcessContext c,
-              RestrictionTracker<OffsetRange, Long> tracker)
+              RestrictionTracker<OffsetRange, Long> tracker,
+
+              WatermarkEstimator watermarkEstimator)
               throws JsonProcessingException {
+
             if (tracker.tryClaim(0L)) {
+              System.out.println("WM: " + watermarkEstimator.currentWatermark());
+
               String jsonWeather = c.element().getValue();
               Weather weather = objectMapper.readValue(jsonWeather, Weather.class);
               Instant timestamp = Instant.parse(weather.timestamp);
@@ -81,7 +86,7 @@ public class AvgTemperaturePerDayPipeline {
 
           @GetInitialRestriction
           public OffsetRange getInitialRestriction(@Element KV<Long, String> rawWeather) {
-            return new OffsetRange(0L, 0L);
+            return new OffsetRange(0L, 1L);
           }
 
         }));
@@ -103,6 +108,7 @@ public class AvgTemperaturePerDayPipeline {
               IntervalWindow window,
               OutputReceiver<KV<Instant, Float>> out) {
             Instant keyDate = window.start();
+            System.out.println("KV: " + keyDate + ", " + temperature);
             KV<Instant, Float> keyedTemperature = KV.of(keyDate, temperature);
             out.output(keyedTemperature);
           }

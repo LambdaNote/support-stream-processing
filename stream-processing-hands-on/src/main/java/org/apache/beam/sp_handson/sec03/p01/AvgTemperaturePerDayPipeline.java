@@ -9,7 +9,7 @@ import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.Mean;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.WithTimestamps;
-import org.apache.beam.sdk.transforms.splittabledofn.OffsetRangeTracker;
+import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimator;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimators;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
@@ -50,29 +50,27 @@ public class AvgTemperaturePerDayPipeline {
     PCollection<Weather> weather = kafkaInput.apply(
         ParDo.of(new DoFn<KV<Long, String>, Weather>() {
           @ProcessElement
-          public void processElement(@Element KV<Long, String> rawWeather, OutputReceiver<Weather> out)
-              throws JsonProcessingException {
-            String jsonWeather = rawWeather.getValue();
-            Weather weather = objectMapper.readValue(jsonWeather, Weather.class);
-            out.output(weather);
-          }
-        }));
-
-    // Monotonousなwatermark
-    PCollection<Weather> weatherWithMonotonousWatermark = weather.apply(
-        ParDo.of(new DoFn<Weather, Weather>() {
-
-          @ProcessElement
           public void processElement(
               ProcessContext c,
-              OffsetRangeTracker tracker) {
-            c.output(c.element());
+              RestrictionTracker<OffsetRange, Long> tracker)
+              throws JsonProcessingException {
+            if (tracker.tryClaim(0L)) {
+              String jsonWeather = c.element().getValue();
+              Weather weather = objectMapper.readValue(jsonWeather, Weather.class);
+              Instant timestamp = Instant.parse(weather.timestamp);
+              c.outputWithTimestamp(weather, timestamp);
+            }
+
           }
 
           @GetInitialWatermarkEstimatorState
           public Instant getInitialWatermarkEstimatorState(
-              @Element Weather w) {
-            return Instant.parse(w.timestamp);
+              @Element KV<Long, String> rawWeather) throws JsonProcessingException {
+
+            String jsonWeather = rawWeather.getValue();
+            Weather weather = objectMapper.readValue(jsonWeather, Weather.class);
+
+            return Instant.parse(weather.timestamp);
           }
 
           @NewWatermarkEstimator
@@ -83,9 +81,10 @@ public class AvgTemperaturePerDayPipeline {
           }
 
           @GetInitialRestriction
-          public OffsetRange getInitialRange(Weather w) {
-            return new OffsetRange(0L, 1L);
+          public OffsetRange getInitialRestriction(@Element KV<Long, String> rawWeather) {
+            return new OffsetRange(0L, 0L);
           }
+
         }));
 
     // Event timeを設定しつつ、過去の日時の気象情報データを許容できるようにする
@@ -93,7 +92,7 @@ public class AvgTemperaturePerDayPipeline {
     // .withAllowedTimestampSkewはdeprecatedになっており
     // https://issues.apache.org/jira/browse/BEAM-644 で代替が提案されているが、
     // Beam v2.42.0点では大体は使えない。
-    PCollection<Weather> timestampedWeather = weatherWithMonotonousWatermark.apply(
+    PCollection<Weather> timestampedWeather = weather.apply(
         WithTimestamps.<Weather>of(w -> Instant.parse(w.timestamp))
     // .withAllowedTimestampSkew(new Duration(Long.MAX_VALUE))
 

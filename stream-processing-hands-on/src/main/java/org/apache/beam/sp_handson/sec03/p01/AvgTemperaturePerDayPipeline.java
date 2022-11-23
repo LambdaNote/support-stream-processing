@@ -43,7 +43,8 @@ public class AvgTemperaturePerDayPipeline {
                         .withReadCommitted()
                         .withoutMetadata());
 
-        // KV<Long, String> のバリュー部分をJSONとしてパースし、Weatherクラスにマッピング
+        // KV<Long, String> のバリュー部分をJSONとしてパースし、Weatherクラスにマッピング。
+        // 合わせて、イベントタイムも設定。
         PCollection<Weather> weather = kafkaInput.apply(
                 ParDo.of(new DoFn<KV<Long, String>, Weather>() {
                     @ProcessElement
@@ -73,8 +74,9 @@ public class AvgTemperaturePerDayPipeline {
         PCollection<KV<String, Float>> windowedTemperatureWithDate = temperatureWithDate.apply(
                 Window.<KV<String, Float>>into(
                         FixedWindows.of(Duration.standardDays(1))
-                                // ウィンドウの開始日時はUTC原点の0時になるので日本時間の0時にずらす
-                                .withOffset(Duration.standardHours(9))));
+                                // ウィンドウの開始日時はUTC原点の0時になるので日本時間の0時にずらす。
+                                // -9時間ずらしたいが、負数指定ができないので 24 - 9 = 15 時間ずらす。
+                                .withOffset(Duration.standardHours(15))));
 
         // 日付毎に、各ウィンドウで気温の平均値を計算
         PCollection<KV<String, Double>> meanTemperature = windowedTemperatureWithDate.apply(

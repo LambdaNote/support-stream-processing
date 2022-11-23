@@ -11,8 +11,13 @@ import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.splittabledofn.RestrictionTracker;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimator;
 import org.apache.beam.sdk.transforms.splittabledofn.WatermarkEstimators;
+import org.apache.beam.sdk.transforms.windowing.AfterProcessingTime;
+import org.apache.beam.sdk.transforms.windowing.AfterWatermark;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
+import org.apache.beam.sdk.transforms.windowing.GlobalWindow;
+import org.apache.beam.sdk.transforms.windowing.GlobalWindows;
 import org.apache.beam.sdk.transforms.windowing.IntervalWindow;
+import org.apache.beam.sdk.transforms.windowing.Repeatedly;
 import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
@@ -91,37 +96,54 @@ public class AvgTemperaturePerDayPipeline {
 
         }));
 
-    PCollection<Float> timestampedTemperature = weather.apply(
+    PCollection<Float> temperature = weather.apply(
         MapElements
             .into(TypeDescriptors.floats())
             .via(w -> w.temperatureC));
 
-    PCollection<Float> windowedTemperature = timestampedTemperature.apply(
-        Window.<Float>into(FixedWindows.of(Duration.standardDays(1))));
+    PCollection<Float> windowedTemperature = temperature.apply(
+        Window.<Float>into(new GlobalWindows())
+            .triggering(
+                Repeatedly.forever(
+                    AfterProcessingTime.pastFirstElementInPane().plusDelayOf(Duration.standardSeconds(1))))
+            .withAllowedLateness(Duration.standardHours(0))
+            .accumulatingFiredPanes()
 
-    // 日付ごとに平均気温を出すため、日付（ウィンドウの開始時刻）をキーにする
-    PCollection<KV<Instant, Float>> keyedTemperature = windowedTemperature.apply(
-        ParDo.of(new DoFn<Float, KV<Instant, Float>>() {
-          @ProcessElement
-          public void processElement(
-              @Element Float temperature,
-              IntervalWindow window,
-              OutputReceiver<KV<Instant, Float>> out) {
-            Instant keyDate = window.start();
-            System.out.println("KV: " + keyDate + ", " + temperature);
-            KV<Instant, Float> keyedTemperature = KV.of(keyDate, temperature);
-            out.output(keyedTemperature);
-          }
-        }));
+    // .triggering(
+    // Repeatedly.forever(AfterWatermark.pastEndOfWindow()
+    // .withEarlyFirings(
+    // AfterProcessingTime.alinedTo(
+    // Duration.standardSeconds(1))))
 
-    PCollection<KV<Instant, Double>> meanTemperature = keyedTemperature.apply(
-        Mean.<Instant, Float>perKey());
+    // )
+
+    // .withAllowedLateness(Duration.standardHours(12))
+    // .accumulatingFiredPanes()
+    );
+
+    // // 日付ごとに平均気温を出すため、日付（ウィンドウの開始時刻）をキーにする
+    // PCollection<KV<Instant, Float>> keyedTemperature = windowedTemperature.apply(
+    // ParDo.of(new DoFn<Float, KV<Instant, Float>>() {
+    // @ProcessElement
+    // public void processElement(
+    // @Element Float temperature,
+    // IntervalWindow window,
+    // OutputReceiver<KV<Instant, Float>> out) {
+    // Instant keyDate = window.start();
+    // System.out.println("KV: " + keyDate + ", " + temperature);
+    // KV<Instant, Float> keyedTemperature = KV.of(keyDate, temperature);
+    // out.output(keyedTemperature);
+    // }
+    // }));
+
+    PCollection<Double> meanTemperature = windowedTemperature.apply(
+        Mean.<Float>globally().withoutDefaults());
 
     // フォーマットして文字列化
     PCollection<String> meanTemperatureLine = meanTemperature.apply(
         MapElements
             .into(TypeDescriptors.strings())
-            .via(kv -> kv.getKey().toString() + "\tmeanTemperature(daily):" + kv.getValue()));
+            .via(mean -> "meanTemperature(daily):" + mean));
 
     // Kafkaシンク出力
     meanTemperatureLine.apply(

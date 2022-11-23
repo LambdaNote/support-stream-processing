@@ -41,7 +41,13 @@ public class WeatherTimestampPolicyFactory<K> implements TimestampPolicyFactory<
 
             @Override
             public Instant getWatermark(PartitionContext ctx) {
-                return lastTimestamp;
+                Instant prevWatermark = previousWatermark.orElse(Instant.EPOCH);
+                // ウォーターマークは単調増加になるようにする
+                if (this.lastTimestamp.getMillis() > prevWatermark.getMillis()) {
+                    return this.lastTimestamp;
+                } else {
+                    return prevWatermark;
+                }
             }
         };
     }

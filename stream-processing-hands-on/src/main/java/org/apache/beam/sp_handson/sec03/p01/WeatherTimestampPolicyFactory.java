@@ -15,7 +15,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 // KafkaIO.Read で使う、Event timeの割当ポリシー（のファクトリ）。
 // 値がJSON文字列であること、Weatherクラスにマッピングできることを前提とし動作。
 //
-// KafkaレコードをいちいちJSONパースするのでパフォーマンス状は良い実装とは言えない。
+// KafkaレコードをいちいちJSONパースするのでパフォーマンス上は良い実装とは言えない。
 public class WeatherTimestampPolicyFactory<K> implements TimestampPolicyFactory<K, String> {
   private static final ObjectMapper objectMapper = new ObjectMapper();
 

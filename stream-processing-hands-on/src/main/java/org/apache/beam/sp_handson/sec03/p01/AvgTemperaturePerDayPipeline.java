@@ -8,6 +8,7 @@ import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.Mean;
 import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.windowing.FixedWindows;
+import org.apache.beam.sdk.transforms.windowing.IntervalWindow;
 import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
@@ -57,38 +58,44 @@ public class AvgTemperaturePerDayPipeline {
           }
         }));
 
-    // 気象情報から日付と気温だけを抽出
-    PCollection<KV<String, Float>> temperatureWithDate = weather.apply(
-        ParDo.of(new DoFn<Weather, KV<String, Float>>() {
-          @ProcessElement
-          public void processElement(
-              @Element Weather w,
-              OutputReceiver<KV<String, Float>> out) {
-            // 日本時間での日付
-            String date = Instant.parse(w.timestamp)
-                .toDateTime(DateTimeZone.forID("+09:00"))
-                .toLocalDate().toString();
-            out.output(KV.of(date, w.temperatureC));
-          }
-        }));
+    // 気象情報から気温だけを抽出
+    PCollection<Float> temperature = weather.apply(
+        MapElements.into(TypeDescriptors.floats())
+            .via(w -> w.temperatureC));
 
     // Event time軸で1日毎の固定幅ウィンドウを構築
-    PCollection<KV<String, Float>> windowedTemperatureWithDate = temperatureWithDate.apply(
-        Window.<KV<String, Float>>into(
+    PCollection<Float> windowedTemperature = temperature.apply(
+        Window.<Float>into(
             FixedWindows.of(Duration.standardDays(1))
                 // ウィンドウの開始日時はUTC原点の0時になるので日本時間の0時にずらす。
                 // -9時間ずらしたいが、負数指定ができないので 24 - 9 = 15 時間ずらす。
                 .withOffset(Duration.standardHours(15))));
 
-    // 日付毎に、各ウィンドウで気温の平均値を計算
-    PCollection<KV<String, Double>> meanTemperature = windowedTemperatureWithDate.apply(
-        Mean.<String, Float>perKey());
+    // ウィンドウから出力される計算結果の日付を把握するために、
+    // ウィンドウ情報からウィンドウ開始点を取得
+    PCollection<KV<Instant, Float>> windowedTemperatureWithDate = windowedTemperature.apply(
+        ParDo.of(new DoFn<Float, KV<Instant, Float>>() {
+          @ProcessElement
+          public void processElement(
+              @Element Float temperature,
+              IntervalWindow window,
+              OutputReceiver<KV<Instant, Float>> out) {
+            Instant keyDate = window.start();
+            out.output(KV.of(keyDate, temperature));
+          }
+        }));
+
+    // 日付（ウィンドウ開始点）毎に、各ウィンドウで気温の平均値を計算
+    PCollection<KV<Instant, Double>> meanTemperature = windowedTemperatureWithDate.apply(
+        Mean.<Instant, Float>perKey());
 
     // フォーマットして文字列化
     PCollection<String> meanTemperatureLine = meanTemperature.apply(
         MapElements
             .into(TypeDescriptors.strings())
-            .via(meanByDate -> "date:" + meanByDate.getKey()
+            .via(meanByDate -> "date:"
+                // 日本時間での日付
+                + meanByDate.getKey().toDateTime(DateTimeZone.forID("+09:00")).toLocalDate().toString()
                 + "\tmeanTemperature(daily):"
                 + meanByDate.getValue()));
 

@@ -7,7 +7,7 @@ import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.Mean;
 import org.apache.beam.sdk.transforms.ParDo;
-import org.apache.beam.sdk.transforms.windowing.FixedWindows;
+import org.apache.beam.sdk.transforms.windowing.IntervalWindow;
 import org.apache.beam.sdk.transforms.windowing.SlidingWindows;
 import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.KV;
@@ -18,12 +18,9 @@ import org.apache.beam.sp_handson.sec03.p01.WeatherTimestampPolicyFactory;
 import org.apache.kafka.common.serialization.LongDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.Duration;
 import org.joda.time.Instant;
-import org.joda.time.format.DateTimeFormat;
-import org.joda.time.format.DateTimeFormatter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,9 +29,6 @@ public class MovingAvgTemperaturePipeline {
 
   // アメダス観測のJSON文字列をWeatherクラスにマッピングするため
   private static final ObjectMapper objectMapper = new ObjectMapper();
-
-  // 日時(hourまで)
-  private static final DateTimeFormatter dateTimeFormatter = DateTimeFormat.forPattern("yyyy-MM-dd HH");
 
   public static void main(String[] args) {
     Pipeline p = Pipeline.create(
@@ -65,41 +59,43 @@ public class MovingAvgTemperaturePipeline {
           }
         }));
 
+    // 気象情報から気温だけを抽出
+    PCollection<Float> temperature = weather.apply(
+        MapElements.into(TypeDescriptors.floats())
+            .via(w -> w.temperatureC));
 
-        //あれ？これだとperKeyでできないな。FixedWindowのほうも本当にPerKey要るのか確かめないと
-    // 気象情報から日時と気温だけを抽出
-    PCollection<KV<String, Float>> temperatureWithDate = weather.apply(
-        ParDo.of(new DoFn<Weather, KV<String, Float>>() {
+    // Event time-basedなスライディングウィンドウを構築
+    PCollection<Float> windowedTemperature = temperature.apply(
+        Window.<Float>into(
+            // ウィンドウ幅: 3時間
+            SlidingWindows.of(Duration.standardHours(3))
+                // オフセット: 1時間
+                .every(Duration.standardHours(1))));
+
+    // ウィンドウ情報からウィンドウ開始点を取得
+    PCollection<KV<Instant, Float>> windowedTemperatureWithDate = windowedTemperature.apply(
+        ParDo.of(new DoFn<Float, KV<Instant, Float>>() {
           @ProcessElement
           public void processElement(
-              @Element Weather w,
-              OutputReceiver<KV<String, Float>> out) {
-            // 日本時間での日時（hourまで）
-            DateTime dt = Instant.parse(w.timestamp)
-                .toDateTime(DateTimeZone.forID("+09:00"));
-            String dth = dateTimeFormatter.print(dt);
-
-            out.output(KV.of(dth, w.temperatureC));
+              @Element Float temperature,
+              IntervalWindow window,
+              OutputReceiver<KV<Instant, Float>> out) {
+            Instant keyDate = window.start();
+            out.output(KV.of(keyDate, temperature));
           }
         }));
 
-    // Event time軸で1日毎の固定幅ウィンドウを構築
-    PCollection<KV<String, Float>> windowedTemperatureWithDate = temperatureWithDate.apply(
-        Window.<KV<String, Float>>into(
-            SlidingWindows.of(Duration.standardHours(3))
-                // ウィンドウの開始日時はUTC原点の0時になるので日本時間の0時にずらす。
-                // -9時間ずらしたいが、負数指定ができないので 24 - 9 = 15 時間ずらす。
-                .withOffset(Duration.standardHours(15))));
-
-    // 日付毎に、各ウィンドウで気温の平均値を計算
-    PCollection<KV<String, Double>> meanTemperature = windowedTemperatureWithDate.apply(
-        Mean.<String, Float>perKey());
+    // ウィンドウ開始点毎に、各ウィンドウで気温の平均値を計算
+    PCollection<KV<Instant, Double>> meanTemperature = windowedTemperatureWithDate.apply(
+        Mean.<Instant, Float>perKey());
 
     // フォーマットして文字列化
     PCollection<String> meanTemperatureLine = meanTemperature.apply(
         MapElements
             .into(TypeDescriptors.strings())
-            .via(meanByDate -> "date:" + meanByDate.getKey()
+            .via(meanByDate -> "date:"
+                // 日本時間での日付
+                + meanByDate.getKey().toDateTime(DateTimeZone.forID("+09:00")).toString()
                 + "\tmeanTemperature(daily):"
                 + meanByDate.getValue()));
 

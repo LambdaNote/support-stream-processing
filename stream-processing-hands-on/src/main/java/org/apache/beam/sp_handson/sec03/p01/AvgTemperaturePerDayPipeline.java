@@ -44,8 +44,7 @@ public class AvgTemperaturePerDayPipeline {
                         .withReadCommitted()
                         .withoutMetadata());
 
-        // KV<Long, String> のバリュー部分をJSONとしてパースし、Weatherクラスにマッピング。
-        // 合わせて、イベントタイムも設定。
+        // KV<Long, String> のバリュー部分をJSONとしてパースし、Weatherクラスにマッピング
         PCollection<Weather> weather = kafkaInput.apply(
                 ParDo.of(new DoFn<KV<Long, String>, Weather>() {
                     @ProcessElement

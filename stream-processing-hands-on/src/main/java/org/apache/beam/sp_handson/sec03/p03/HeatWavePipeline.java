@@ -3,6 +3,7 @@ package org.apache.beam.sp_handson.sec03.p03;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.kafka.KafkaIO;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.transforms.Combine;
 import org.apache.beam.sdk.transforms.Count;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
@@ -83,23 +84,27 @@ public class HeatWavePipeline {
         Window.<Float>into(
             Sessions.withGapDuration(Duration.standardDays(1))));
 
-    // ウィンドウ情報からウィンドウ開始点を取得
-    PCollection<KV<Instant, Float>> windowedTemperatureWithDate = windowedTemperature.apply(
-        ParDo.of(new DoFn<Float, KV<Instant, Float>>() {
-          @ProcessElement
-          public void processElement(
-              @Element Float temperature,
-              IntervalWindow window,
-              OutputReceiver<KV<Instant, Float>> out) {
-            Instant winStart = window.start();
-            out.output(KV.of(winStart, temperature));
-          }
-        }));
+    // // ウィンドウ情報からウィンドウ開始点を取得
+    // PCollection<KV<Instant, Float>> windowedTemperatureWithDate =
+    // windowedTemperature.apply(
+    // ParDo.of(new DoFn<Float, KV<Instant, Float>>() {
+    // @ProcessElement
+    // public void processElement(
+    // @Element Float temperature,
+    // IntervalWindow window,
+    // OutputReceiver<KV<Instant, Float>> out) {
+    // Instant winEnd = window.maxTimestamp();
+
+    // System.out.println(winEnd + "\t" + temperature);
+
+    // out.output(KV.of(winEnd, temperature));
+    // }
+    // }));
 
     // ウィンドウ開始点毎（セッションウィンドウ毎）に、
     // 各ウィンドウでのイベントの個数（30℃以上が継続した日数）をカウント
-    PCollection<KV<Instant, Long>> eventCounts = windowedTemperatureWithDate.apply(
-        Count.<Instant, Float>perKey());
+    PCollection<Long> eventCounts = windowedTemperature.apply(
+        Combine.globally(Count.<Float>combineFn()).withoutDefaults());
 
     // フォーマットして文字列化
     PCollection<String> meanTemperatureLine = eventCounts.apply(
@@ -107,9 +112,9 @@ public class HeatWavePipeline {
             .into(TypeDescriptors.strings())
             .via(cnt -> "leftmost datetime:"
                 // 日本時間での日時
-                + cnt.getKey().toDateTime(DateTimeZone.forID("+09:00")).toString()
+                // + cnt.getKey().toDateTime(DateTimeZone.forID("+09:00")).toString()
                 + "\tcount:"
-                + cnt.getValue()));
+                + cnt));
 
     // Kafkaシンク出力
     meanTemperatureLine.apply(

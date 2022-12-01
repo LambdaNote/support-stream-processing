@@ -80,8 +80,8 @@ public class AvgTemperaturePerDayPipeline {
               @Element Float temperature,
               IntervalWindow window,
               OutputReceiver<KV<Instant, Float>> out) {
-            Instant keyDate = window.start();
-            out.output(KV.of(keyDate, temperature));
+            Instant winStart = window.start();
+            out.output(KV.of(winStart, temperature));
           }
         }));
 

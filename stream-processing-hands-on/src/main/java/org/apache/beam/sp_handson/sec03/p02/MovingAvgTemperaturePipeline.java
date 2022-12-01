@@ -93,11 +93,11 @@ public class MovingAvgTemperaturePipeline {
     PCollection<String> meanTemperatureLine = meanTemperature.apply(
         MapElements
             .into(TypeDescriptors.strings())
-            .via(meanByDate -> "date:"
-                // 日本時間での日付
-                + meanByDate.getKey().toDateTime(DateTimeZone.forID("+09:00")).toString()
-                + "\tmeanTemperature(daily):"
-                + meanByDate.getValue()));
+            .via(mean -> "leftmost datetime:"
+                // 日本時間での日時
+                + mean.getKey().toDateTime(DateTimeZone.forID("+09:00")).toString()
+                + "\tmeanTemperature(per 3-hour):"
+                + mean.getValue()));
 
     // Kafkaシンク出力
     meanTemperatureLine.apply(

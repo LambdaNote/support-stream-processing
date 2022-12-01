@@ -93,11 +93,11 @@ public class AvgTemperaturePerDayPipeline {
     PCollection<String> meanTemperatureLine = meanTemperature.apply(
         MapElements
             .into(TypeDescriptors.strings())
-            .via(meanByDate -> "date:"
+            .via(mean -> "date:"
                 // 日本時間での日付
-                + meanByDate.getKey().toDateTime(DateTimeZone.forID("+09:00")).toLocalDate().toString()
+                + mean.getKey().toDateTime(DateTimeZone.forID("+09:00")).toLocalDate().toString()
                 + "\tmeanTemperature(daily):"
-                + meanByDate.getValue()));
+                + mean.getValue()));
 
     // Kafkaシンク出力
     meanTemperatureLine.apply(

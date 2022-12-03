@@ -8,7 +8,6 @@ import org.apache.beam.sdk.transforms.Count;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
 import org.apache.beam.sdk.transforms.ParDo;
-import org.apache.beam.sdk.transforms.windowing.IntervalWindow;
 import org.apache.beam.sdk.transforms.windowing.Sessions;
 import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.KV;
@@ -26,11 +25,14 @@ import org.joda.time.Instant;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-// 30℃以上の気温が継続した日数をカウントするパイプライン
-public class HeatWavePipeline {
+// 降水が持続した時間をカウントするパイプライン
+public class ContinuousRainPipeline {
 
   // アメダス観測のJSON文字列をWeatherクラスにマッピングするため
   private static final ObjectMapper objectMapper = new ObjectMapper();
+
+  // セッション持続時間（セッションウィンドウは開区間なので3600秒だと隣接データに届かない）
+  private static final Duration sessionDuration = Duration.millis(60 * 60 * 1000 + (long) 1);
 
   public static void main(String[] args) {
     Pipeline p = Pipeline.create(
@@ -61,70 +63,53 @@ public class HeatWavePipeline {
           }
         }));
 
-    // 気象情報から気温だけを抽出
-    PCollection<Float> temperature = weather.apply(
+    // 気象情報から降水量だけを抽出
+    PCollection<Float> rainfall = weather.apply(
         MapElements.into(TypeDescriptors.floats())
-            .via(w -> w.temperatureC));
+            .via(w -> w.rainfallMm));
 
-    // 30℃以上の気温だけをフィルタリング
-    PCollection<Float> temperatureOver30 = temperature.apply(
+    // 降水時だけをフィルタリング
+    PCollection<Float> rainfallOver0 = rainfall.apply(
         ParDo.of(new DoFn<Float, Float>() {
           @ProcessElement
           public void processElement(
-              @Element Float t,
+              @Element Float r,
               OutputReceiver<Float> out) {
-            if (t >= 30.0) {
-              out.output(t);
+            if (r > 0.0) {
+              out.output(r);
             }
           }
         }));
 
-    // Event time-basedなセッションウィンドウ（セッション持続時間 = 1日）を構築
-    PCollection<Float> windowedTemperature = temperatureOver30.apply(
+    // Event time-basedなセッションウィンドウ（セッション持続時間 = 1時間）を構築
+    PCollection<Float> windowedRainfall = rainfallOver0.apply(
         Window.<Float>into(
-            Sessions.withGapDuration(Duration.standardDays(1))));
-
-    // // ウィンドウ情報からウィンドウ開始点を取得
-    // PCollection<KV<Instant, Float>> windowedTemperatureWithDate =
-    // windowedTemperature.apply(
-    // ParDo.of(new DoFn<Float, KV<Instant, Float>>() {
-    // @ProcessElement
-    // public void processElement(
-    // @Element Float temperature,
-    // IntervalWindow window,
-    // OutputReceiver<KV<Instant, Float>> out) {
-    // Instant winEnd = window.maxTimestamp();
-
-    // System.out.println(winEnd + "\t" + temperature);
-
-    // out.output(KV.of(winEnd, temperature));
-    // }
-    // }));
+            Sessions.withGapDuration(sessionDuration)));
 
     // ウィンドウ開始点毎（セッションウィンドウ毎）に、
-    // 各ウィンドウでのイベントの個数（30℃以上が継続した日数）をカウント
-    PCollection<Long> eventCounts = windowedTemperature.apply(
+    // 各ウィンドウでのイベントの個数（降水がある時間数）をカウント
+    PCollection<Long> eventCounts = windowedRainfall.apply(
         Combine.globally(Count.<Float>combineFn()).withoutDefaults());
 
     // フォーマットして文字列化
-    PCollection<String> meanTemperatureLine = eventCounts.apply(
+    PCollection<String> rainfallCountLine = eventCounts.apply(
         ParDo.of(new DoFn<Long, String>() {
           @ProcessElement
           public void processElement(
               @Element Long cnt,
               @Timestamp Instant ts,
               OutputReceiver<String> out) {
-            String s = "leftmost datetime:"
+            String s = "rainStoppedAt:"
                 // 日本時間での日時
                 + ts.toDateTime(DateTimeZone.forID("+09:00")).toString()
-                + "\tcount:"
+                + "\trainContinued[h]:"
                 + cnt;
             out.output(s);
           }
         }));
 
     // Kafkaシンク出力
-    meanTemperatureLine.apply(KafkaIO.<Void, String>write().withBootstrapServers("localhost:9092").withTopic("beam-out")
+    rainfallCountLine.apply(KafkaIO.<Void, String>write().withBootstrapServers("localhost:9092").withTopic("beam-out")
         .withValueSerializer(StringSerializer.class).values());
 
     p.run();

@@ -108,21 +108,24 @@ public class HeatWavePipeline {
 
     // フォーマットして文字列化
     PCollection<String> meanTemperatureLine = eventCounts.apply(
-        MapElements
-            .into(TypeDescriptors.strings())
-            .via(cnt -> "leftmost datetime:"
+        ParDo.of(new DoFn<Long, String>() {
+          @ProcessElement
+          public void processElement(
+              @Element Long cnt,
+              @Timestamp Instant ts,
+              OutputReceiver<String> out) {
+            String s = "leftmost datetime:"
                 // 日本時間での日時
-                // + cnt.getKey().toDateTime(DateTimeZone.forID("+09:00")).toString()
+                + ts.toDateTime(DateTimeZone.forID("+09:00")).toString()
                 + "\tcount:"
-                + cnt));
+                + cnt;
+            out.output(s);
+          }
+        }));
 
     // Kafkaシンク出力
-    meanTemperatureLine.apply(
-        KafkaIO.<Void, String>write()
-            .withBootstrapServers("localhost:9092")
-            .withTopic("beam-out")
-            .withValueSerializer(StringSerializer.class)
-            .values());
+    meanTemperatureLine.apply(KafkaIO.<Void, String>write().withBootstrapServers("localhost:9092").withTopic("beam-out")
+        .withValueSerializer(StringSerializer.class).values());
 
     p.run();
   }

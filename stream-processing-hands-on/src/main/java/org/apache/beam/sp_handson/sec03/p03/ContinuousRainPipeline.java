@@ -42,8 +42,7 @@ public class ContinuousRainPipeline {
     PCollection<KV<Long, String>> kafkaInput = p.apply(
         KafkaIO.<Long, String>read()
             .withBootstrapServers("localhost:9092")
-            // 東京用のトピックを使用
-            .withTopic("weather-tokyo")
+            .withTopic("weather-kushiro")
             .withKeyDeserializer(LongDeserializer.class)
             .withValueDeserializer(StringDeserializer.class)
             .withTimestampPolicyFactory(new WeatherTimestampPolicyFactory<>())
@@ -97,7 +96,7 @@ public class ContinuousRainPipeline {
           @ProcessElement
           public void processElement(
               @Element Long cnt,
-              @Timestamp Instant ts,
+              @Timestamp Instant ts,  // ウィンドウからの出力のイベント時刻
               OutputReceiver<String> out) {
             String s = "rainStoppedAt:"
                 // 日本時間での日時

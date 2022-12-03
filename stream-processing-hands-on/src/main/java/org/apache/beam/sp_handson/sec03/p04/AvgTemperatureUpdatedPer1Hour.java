@@ -1,14 +1,15 @@
-package org.apache.beam.sp_handson.sec03.p03;
+package org.apache.beam.sp_handson.sec03.p04;
 
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.kafka.KafkaIO;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
-import org.apache.beam.sdk.transforms.Combine;
-import org.apache.beam.sdk.transforms.Count;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.apache.beam.sdk.transforms.MapElements;
+import org.apache.beam.sdk.transforms.Mean;
 import org.apache.beam.sdk.transforms.ParDo;
-import org.apache.beam.sdk.transforms.windowing.Sessions;
+import org.apache.beam.sdk.transforms.windowing.AfterProcessingTime;
+import org.apache.beam.sdk.transforms.windowing.GlobalWindows;
+import org.apache.beam.sdk.transforms.windowing.Repeatedly;
 import org.apache.beam.sdk.transforms.windowing.Window;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
@@ -18,21 +19,16 @@ import org.apache.beam.sp_handson.sec03.p01.WeatherTimestampPolicyFactory;
 import org.apache.kafka.common.serialization.LongDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.joda.time.DateTimeZone;
 import org.joda.time.Duration;
-import org.joda.time.Instant;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-// 降水が持続した時間をカウントするパイプライン
-public class ContinuousRainPipeline {
+// 全データ通した平均気温を処理時間軸で1秒ごとに更新し出力するパイプライン
+public class AvgTemperatureUpdatedPer1Hour {
 
   // アメダス観測のJSON文字列をWeatherクラスにマッピングするため
   private static final ObjectMapper objectMapper = new ObjectMapper();
-
-  // セッション持続時間（セッションウィンドウは開区間なので3600秒だと隣接データに届かない）
-  private static final Duration sessionDuration = Duration.millis(60 * 60 * 1000 + (long) 1);
 
   public static void main(String[] args) {
     Pipeline p = Pipeline.create(
@@ -62,46 +58,33 @@ public class ContinuousRainPipeline {
           }
         }));
 
-    // 気象情報から降水量だけを抽出
-    PCollection<Float> rainfall = weather.apply(
+    // 気象情報から気温だけを抽出
+    PCollection<Float> temperature = weather.apply(
         MapElements.into(TypeDescriptors.floats())
-            .via(w -> w.rainfallMm));
+            .via(w -> w.temperatureC));
 
-    // 降水時だけをフィルタリング
-    PCollection<Float> rainfallOver0 = rainfall.apply(
-        ParDo.of(new DoFn<Float, Float>() {
-          @ProcessElement
-          public void processElement(
-              @Element Float r,
-              OutputReceiver<Float> out) {
-            if (r > 0.0) {
-              out.output(r);
-            }
-          }
-        }));
+    // グローバルウィンドウに対し、処理時間軸で1秒ごとのトリガーを設定
+    PCollection<Float> windowedTemperature = temperature.apply(
+        Window.<Float>into(new GlobalWindows())
+            .triggering(
+                Repeatedly.forever(
+                    AfterProcessingTime.pastFirstElementInPane()
+                        .plusDelayOf(Duration.standardSeconds(1))))
+            // 今までのトリガーされた値と無関係に最新値を出力するモード
+            .discardingFiredPanes());
 
-    // Event time-basedなセッションウィンドウ（セッション持続時間 = 1時間）を構築
-    PCollection<Float> windowedRainfall = rainfallOver0.apply(
-        Window.<Float>into(
-            Sessions.withGapDuration(sessionDuration)));
-
-    // 各ウィンドウでのイベントの個数（降水がある時間数）をカウント
-    PCollection<Long> eventCounts = windowedRainfall.apply(
-        Combine.globally(Count.<Float>combineFn()).withoutDefaults());
+    // トリガーが発動された際に実行される集約演算（平均）
+    PCollection<Double> meanTemperature = windowedTemperature.apply(
+        Mean.<Float>globally().withoutDefaults());
 
     // フォーマットして文字列化
-    PCollection<String> rainfallCountLine = eventCounts.apply(
-        ParDo.of(new DoFn<Long, String>() {
+    PCollection<String> rainfallCountLine = meanTemperature.apply(
+        ParDo.of(new DoFn<Double, String>() {
           @ProcessElement
           public void processElement(
-              @Element Long cnt,
-              @Timestamp Instant ts,  // ウィンドウからの出力のイベント時刻
+              @Element Double meanT,
               OutputReceiver<String> out) {
-            String s = "rainStoppedAt:"
-                // 日本時間での日時
-                + ts.toDateTime(DateTimeZone.forID("+09:00")).toString()
-                + "\trainContinued[h]:"
-                + cnt;
+            String s = "currentMeanTemperature:" + meanT;
             out.output(s);
           }
         }));
